@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#101827">
+<title>Coin Catcher</title>
+<style>
+  :root { color-scheme: dark; --bg:#101827; --panel:#1b2940; --gold:#ffd166; --mint:#6ee7b7; --text:#f4f7fb; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; display:grid; place-items:center; padding:24px; background:radial-gradient(circle at top,#243b59,var(--bg) 65%); color:var(--text); font:16px system-ui,sans-serif; }
+  main { width:min(100%,560px); text-align:center; }
+  h1 { margin:0 0 6px; font-size:clamp(2rem,7vw,3rem); letter-spacing:-.04em; }
+  .sub { margin:0 0 18px; color:#b9c7d9; }
+  .hud { display:flex; justify-content:space-between; gap:12px; margin:0 0 10px; }
+  .stat { flex:1; padding:10px 14px; border-radius:14px; background:var(--panel); color:#cbd5e1; }
+  .stat strong { display:block; color:var(--gold); font-size:1.35rem; }
+  .stage { position:relative; overflow:hidden; border:2px solid #526782; border-radius:20px; background:linear-gradient(#172b43,#102033); box-shadow:0 18px 50px #0006; }
+  canvas { display:block; width:100%; height:auto; touch-action:none; }
+  .overlay { position:absolute; inset:0; display:grid; place-content:center; gap:12px; padding:24px; background:#091321c9; }
+  .overlay[hidden] { display:none; }
+  .overlay h2 { margin:0; font-size:2rem; }
+  button { border:0; border-radius:999px; padding:12px 22px; background:var(--gold); color:#20202a; font-weight:800; font-size:1rem; cursor:pointer; }
+  button:focus-visible { outline:3px solid white; outline-offset:3px; }
+  .controls { display:flex; justify-content:center; gap:18px; margin-top:14px; }
+  .controls button { width:74px; font-size:1.4rem; background:#2b4260; color:white; touch-action:none; }
+  .hint { color:#9fb0c5; font-size:.9rem; margin:12px 0 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>🪙 Coin Catcher</h1>
+  <p class="sub">Vang de munten. Ontwijk de bommen!</p>
+  <section class="hud" aria-label="Spelstatus">
+    <div class="stat">Score<strong id="score">0</strong></div>
+    <div class="stat">Record<strong id="best">0</strong></div>
+    <div class="stat">Levens<strong id="lives">3</strong></div>
+  </section>
+  <div class="stage">
+    <canvas id="game" width="480" height="600" aria-label="Spelveld"></canvas>
+    <div class="overlay" id="overlay">
+      <h2 id="message">Klaar om te spelen?</h2>
+      <p id="detail">Beweeg met ← → of A en D. Vang munten en ontwijk bommen.</p>
+      <button id="start">Start game</button>
+    </div>
+  </div>
+  <div class="controls" aria-label="Aanraakbediening">
+    <button id="left" aria-label="Naar links">←</button>
+    <button id="right" aria-label="Naar rechts">→</button>
+  </div>
+  <p class="hint">Tip: je kunt ook je muis of vinger gebruiken om de speler te bewegen.</p>
+</main>
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const scoreEl = document.getElementById('score');
+  const bestEl = document.getElementById('best');
+  const livesEl = document.getElementById('lives');
+  const overlay = document.getElementById('overlay');
+  const message = document.getElementById('message');
+  const detail = document.getElementById('detail');
+  const startBtn = document.getElementById('start');
+  const W = canvas.width, H = canvas.height;
+  let player, items, score, lives, best, running, lastTime, spawnTimer, keys;
+  best = Number(localStorage.getItem('coinCatcherBest') || 0);
+  bestEl.textContent = best;
+  keys = { left:false, right:false };
+
+  function reset() {
+    player = { x:W/2, y:H-58, w:76, h:22, speed:360 };
+    items = []; score = 0; lives = 3; spawnTimer = 0; lastTime = 0;
+    scoreEl.textContent = score; livesEl.textContent = lives;
+  }
+  function start() {
+    reset(); running = true; overlay.hidden = true;
+    requestAnimationFrame(loop);
+  }
+  function end() {
+    running = false;
+    message.textContent = 'Game over!';
+    detail.textContent = 'Je score: ' + score + ' — probeer je record te verbeteren.';
+    startBtn.textContent = 'Opnieuw spelen';
+    overlay.hidden = false;
+  }
+  function spawn() {
+    const bomb = Math.random() < 0.22;
+    items.push({ x:24 + Math.random()*(W-48), y:-24, r:bomb?15:13, speed:150+Math.random()*100+score*2, bomb });
+  }
+  function draw() {
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle = '#ffffff0b';
+    for(let x=20;x<W;x+=40) for(let y=20;y<H;y+=40) { ctx.beginPath(); ctx.arc(x,y,1.5,0,Math.PI*2); ctx.fill(); }
+    // Player basket
+    ctx.fillStyle = '#6ee7b7'; ctx.beginPath();
+    ctx.roundRect(player.x-player.w/2,player.y,player.w,player.h,8); ctx.fill();
+    ctx.fillStyle = '#b7ffe1'; ctx.fillRect(player.x-player.w/2+8,player.y+4,player.w-16,4);
+    for(const item of items) {
+      ctx.beginPath(); ctx.arc(item.x,item.y,item.r,0,Math.PI*2);
+      ctx.fillStyle = item.bomb ? '#ff647c' : '#ffd166'; ctx.fill();
+      ctx.fillStyle = item.bomb ? '#651b35' : '#a66b00';
+      ctx.font = 'bold 16px system-ui'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(item.bomb?'!':'$',item.x,item.y+1);
+    }
+  }
+  function loop(time) {
+    if(!running) return;
+    const dt = Math.min((time-lastTime)/1000 || 0, .032); lastTime = time;
+    if(keys.left) player.x -= player.speed*dt;
+    if(keys.right) player.x += player.speed*dt;
+    player.x = Math.max(player.w/2,Math.min(W-player.w/2,player.x));
+    spawnTimer += dt;
+    if(spawnTimer > Math.max(.32,.82-score*.008)) { spawn(); spawnTimer=0; }
+    for(let i=items.length-1;i>=0;i--) {
+      const item=items[i]; item.y += item.speed*dt;
+      const caught = item.y+item.r >= player.y && item.y-item.r <= player.y+player.h &&
+        item.x >= player.x-player.w/2-item.r && item.x <= player.x+player.w/2+item.r;
+      if(caught) {
+        if(item.bomb) { lives--; livesEl.textContent=lives; }
+        else { score+=10; scoreEl.textContent=score; }
+        items.splice(i,1);
+        if(score>best) { best=score; bestEl.textContent=best; localStorage.setItem('coinCatcherBest',best); }
+        if(lives<=0) { draw(); end(); return; }
+      } else if(item.y-item.r>H) items.splice(i,1);
+    }
+    draw(); requestAnimationFrame(loop);
+  }
+  function moveToPointer(e) {
+    const rect=canvas.getBoundingClientRect();
+    player.x=(e.clientX-rect.left)/rect.width*W;
+    player.x=Math.max(player.w/2,Math.min(W-player.w/2,player.x));
+  }
+  canvas.addEventListener('pointermove',e=>{ if(running && e.pointerType!=='touch') moveToPointer(e); });
+  canvas.addEventListener('pointerdown',e=>{ if(running) moveToPointer(e); });
+  window.addEventListener('keydown',e=>{
+    if(['ArrowLeft','ArrowRight','a','d','A','D'].includes(e.key)) e.preventDefault();
+    if(e.key==='ArrowLeft'||e.key.toLowerCase()==='a') keys.left=true;
+    if(e.key==='ArrowRight'||e.key.toLowerCase()==='d') keys.right=true;
+  });
+  window.addEventListener('keyup',e=>{
+    if(e.key==='ArrowLeft'||e.key.toLowerCase()==='a') keys.left=false;
+    if(e.key==='ArrowRight'||e.key.toLowerCase()==='d') keys.right=false;
+  });
+  function holdButton(id,dir) {
+    const el=document.getElementById(id);
+    el.addEventListener('pointerdown',e=>{e.preventDefault();keys[dir]=true;el.setPointerCapture(e.pointerId);});
+    ['pointerup','pointercancel','lostpointercapture'].forEach(type=>el.addEventListener(type,()=>keys[dir]=false));
+  }
+  holdButton('left','left'); holdButton('right','right');
+  startBtn.addEventListener('click',start);
+  reset(); draw();
+})();
+</script>
+</body>
+</html>
